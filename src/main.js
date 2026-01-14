@@ -59,7 +59,7 @@ async function main() {
                 const pageUri = `${urlObj.pathname}?page=${pageNum}`;
 
                 const apiUrl = 'https://1.rome.api.flipkart.com/api/4/page/fetch';
-                
+
                 const response = await gotScraping({
                     url: apiUrl,
                     method: 'POST',
@@ -73,7 +73,7 @@ async function main() {
                     },
                     body: JSON.stringify({
                         pageUri: pageUri,
-                        locationContext: {},
+                        pageContext: { fetchSeoData: true },
                     }),
                     proxyUrl,
                     responseType: 'json',
@@ -95,50 +95,49 @@ async function main() {
         function extractReviewsFromAPI(apiData, productInfo) {
             const reviews = [];
             try {
-                // Navigate through the API response structure to find reviews
-                // Flipkart API response is deeply nested
-                const pageData = apiData?.RESPONSE?.pageData?.pageContext;
-                if (!pageData) return reviews;
+                // Correct path: RESPONSE.pageData.slots[].widget where type === 'REVIEWS'
+                const slots = apiData?.RESPONSE?.pageData?.slots;
+                if (!Array.isArray(slots)) {
+                    log.warning('API response missing slots array');
+                    return reviews;
+                }
 
-                // Try to find review widgets in the page data
-                const reviewWidgets = [];
-                
-                // Helper to recursively search for review data
-                function findReviews(obj) {
-                    if (!obj || typeof obj !== 'object') return;
-                    
-                    for (const key in obj) {
-                        const value = obj[key];
-                        
-                        // Look for review-like structures
-                        if (value && typeof value === 'object') {
-                            if (value.reviewId || value.review || value.rating) {
-                                reviewWidgets.push(value);
-                            }
-                            findReviews(value);
+                // Find slots with review data
+                for (const slot of slots) {
+                    if (!slot?.widget) continue;
+
+                    // Look for REVIEWS widget
+                    if (slot.widget.type === 'REVIEWS' && slot.widget.data?.renderableComponents) {
+                        const components = slot.widget.data.renderableComponents;
+
+                        for (const component of components) {
+                            const reviewData = component?.value;
+                            if (!reviewData) continue;
+
+                            // Extract review fields
+                            const reviewId = reviewData.id ||
+                                Buffer.from(`${reviewData.author}_${reviewData.created}`.slice(0, 50)).toString('base64').slice(0, 20);
+
+                            reviews.push({
+                                product_name: productInfo.productName,
+                                product_id: productInfo.productId,
+                                review_id: reviewId,
+                                rating: reviewData.rating || null,
+                                title: reviewData.title || null,
+                                review_text: reviewData.text || null,
+                                author: reviewData.author || null,
+                                date: reviewData.created || null,
+                                verified_purchase: reviewData.certifiedBuyer === true,
+                                helpful_count: reviewData.upvote?.value?.count || 0,
+                                review_images: [],
+                                url: null, // Will be added later
+                            });
                         }
                     }
                 }
-                
-                findReviews(pageData);
 
-                for (const reviewData of reviewWidgets) {
-                    const reviewId = reviewData.reviewId || reviewData.id;
-                    if (!reviewId) continue;
-
-                    reviews.push({
-                        product_name: productInfo.productName,
-                        product_id: productInfo.productId,
-                        review_id: reviewId,
-                        rating: reviewData.rating || reviewData.overallRating || null,
-                        title: reviewData.title || reviewData.reviewTitle || null,
-                        review_text: reviewData.text || reviewData.reviewText || reviewData.review || null,
-                        author: reviewData.author || reviewData.userName || reviewData.name || null,
-                        date: reviewData.date || reviewData.reviewDate || reviewData.createdAt || null,
-                        verified_purchase: reviewData.certifiedBuyer || reviewData.verified || false,
-                        helpful_count: reviewData.helpfulCount || reviewData.helpfulVotes || 0,
-                        review_images: Array.isArray(reviewData.images) ? reviewData.images : [],
-                    });
+                if (reviews.length === 0) {
+                    log.warning('No reviews found in API response slots');
                 }
             } catch (err) {
                 log.error(`Error extracting reviews from API: ${err.message}`);
@@ -152,57 +151,66 @@ async function main() {
             const productInfo = extractProductInfo(reviewUrl);
             if (!productInfo) return reviews;
 
-            // Find all review containers
-            const reviewContainers = $('div').filter((_, el) => {
-                const text = $(el).text();
-                return text.includes('Certified Buyer') || text.includes('★') || text.includes('READ MORE');
-            });
+            // Use correct CSS selectors: div.gMdEY7.rmo75L
+            const reviewContainers = $('div.gMdEY7.rmo75L');
+            log.info(`Found ${reviewContainers.length} review containers in HTML`);
 
-            const uniqueContainers = new Set();
-            
-            reviewContainers.each((_, container) => {
+            reviewContainers.each((index, container) => {
                 try {
                     const $container = $(container);
-                    const containerHtml = $.html(container);
-                    
-                    // Avoid duplicates
-                    if (uniqueContainers.has(containerHtml)) return;
-                    uniqueContainers.add(containerHtml);
 
-                    // Extract rating (look for star or numeric rating)
+                    // Rating: div.MKiFS6
                     let rating = null;
-                    const ratingElem = $container.find('div[class*="_3LWZlK"], div[class*="XQDdHH"]').first();
+                    const ratingElem = $container.find('div.MKiFS6').first();
                     if (ratingElem.length) {
                         const ratingText = ratingElem.text().trim();
                         const match = ratingText.match(/(\d+)/);
                         if (match) rating = parseInt(match[1]);
                     }
 
-                    // Extract title
-                    const title = $container.find('p[class*="_2-N1Vz"], p[class*="z9E0IG"]').first().text().trim() || null;
+                    // Review text: div.HM2vKw
+                    const reviewTextElem = $container.find('div.HM2vKw').first();
+                    const reviewText = reviewTextElem.text().trim() || null;
 
-                    // Extract review text
-                    const reviewText = $container.find('div[class*="t-ZTKy"], div[class*="ZmyHeo"]').first().text().trim() || null;
-
-                    // Extract author
-                    const authorElem = $container.find('p[class*="_2sc7Ds"], p[class*="_2NsDsF"]').first();
-                    const author = authorElem.text().trim() || null;
-
-                    // Extract date (usually second p with same class or in metadata)
-                    let date = null;
-                    const dateElems = $container.find('p[class*="_2sc7Ds"], p[class*="_2NsDsF"]');
-                    if (dateElems.length > 1) {
-                        date = $(dateElems[1]).text().trim();
+                    // Title: use first sentence as title
+                    let title = null;
+                    if (reviewText) {
+                        const firstSentence = reviewText.split('.')[0];
+                        if (firstSentence && firstSentence.length < 100) {
+                            title = firstSentence;
+                        }
                     }
 
-                    // Check for verified purchase
-                    const verified = $container.text().includes('Certified Buyer');
+                    // Author: p.zJ1ZGa.ZDi3w2
+                    const authorElem = $container.find('p.zJ1ZGa.ZDi3w2').first();
+                    const author = authorElem.text().trim() || null;
 
-                    // Generate review ID from content hash
-                    const reviewId = Buffer.from(`${author}_${title}_${reviewText}`.slice(0, 100)).toString('base64').slice(0, 20);
+                    // Date: p.zJ1ZGa (without ZDi3w2)
+                    let date = null;
+                    const dateElems = $container.find('p.zJ1ZGa');
+                    dateElems.each((_, elem) => {
+                        if (!$(elem).hasClass('ZDi3w2')) {
+                            date = $(elem).text().trim();
+                            return false;
+                        }
+                    });
 
-                    // Only add if we have meaningful data
-                    if ((title || reviewText) && rating) {
+                    // Verified: p.Zhmv6U
+                    const verifiedElem = $container.find('p.Zhmv6U');
+                    const verified = verifiedElem.length > 0 || $container.text().includes('Certified Buyer');
+
+                    // Helpful count: span.Fp3hrV
+                    let helpfulCount = 0;
+                    const helpfulElem = $container.find('span.Fp3hrV').first();
+                    if (helpfulElem.length) {
+                        const countText = helpfulElem.text().trim();
+                        const match = countText.match(/(\d+)/);
+                        if (match) helpfulCount = parseInt(match[1]);
+                    }
+
+                    const reviewId = Buffer.from(`${author}_${reviewText}`.slice(0, 100)).toString('base64').slice(0, 20);
+
+                    if (rating && reviewText) {
                         reviews.push({
                             product_name: productInfo.productName,
                             product_id: productInfo.productId,
@@ -213,12 +221,12 @@ async function main() {
                             author,
                             date,
                             verified_purchase: verified,
-                            helpful_count: 0,
+                            helpful_count: helpfulCount,
                             review_images: [],
                         });
                     }
                 } catch (err) {
-                    // Skip malformed reviews
+                    log.warning(`Failed to parse review ${index}: ${err.message}`);
                 }
             });
 
@@ -259,7 +267,7 @@ async function main() {
                 // Try API first
                 const proxyUrl = proxyInfo?.url;
                 const apiResult = await fetchViaAPI(baseUrl, pageNo, proxyUrl);
-                
+
                 if (apiResult && apiResult.data) {
                     reviews = extractReviewsFromAPI(apiResult.data, apiResult.productInfo);
                     if (reviews.length > 0) {
@@ -278,7 +286,7 @@ async function main() {
                 // Process and save reviews
                 for (const review of reviews) {
                     if (saved >= RESULTS_WANTED) break;
-                    
+
                     // Deduplicate by review ID
                     if (seenReviewIds.has(review.review_id)) continue;
                     seenReviewIds.add(review.review_id);
