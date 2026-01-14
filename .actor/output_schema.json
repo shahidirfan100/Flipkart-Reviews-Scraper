@@ -1,21 +1,11 @@
 {
-    "actorSpecification": 1,
-    "fields": {},
-    "views": {
+    "actorOutputSchemaVersion": 1,
+    "title": "Flipkart Products Output",
+    "properties": {
         "overview": {
-            "title": "Overview",
-            "transformation": {
-                "fields": [
-                    "product_name",
-                    "rating",
-                    "title",
-                    "review_text",
-                    "author",
-                    "date",
-                    "verified_purchase",
-                    "url"
-                ]
-            }
+            "type": "string",
+            "title": "Product Overview",
+            "template": "{{links.apiDefaultDatasetUrl}}/items?view=overview"
         }
     }
 }
