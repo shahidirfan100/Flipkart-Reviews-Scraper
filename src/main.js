@@ -32,28 +32,18 @@ async function main() {
                 const urlObj = new URL(inputUrl);
                 const path = urlObj.pathname;
 
-                // Already a review URL
-                if (path.includes('/product-reviews/')) {
-                    return inputUrl;
-                }
+                if (path.includes('/product-reviews/')) return inputUrl;
 
-                // Product URL format: /product-name/p/itmXXX
                 const productMatch = path.match(/\/([^\/]+)\/p\/(itm[a-z0-9]+)/i);
                 if (productMatch) {
-                    const productName = productMatch[1];
-                    const productId = productMatch[2];
-                    return `https://www.flipkart.com/${productName}/product-reviews/${productId}`;
+                    return `https://www.flipkart.com/${productMatch[1]}/product-reviews/${productMatch[2]}`;
                 }
 
-                // If URL has pid parameter, extract it
-                const pid = urlObj.searchParams.get('pid');
-                if (pid) {
+                const itmMatch = path.match(/(itm[a-z0-9]+)/i);
+                if (itmMatch) {
                     const pathParts = path.split('/').filter(p => p);
                     const productName = pathParts[0] || 'product';
-                    // Find itm ID in the path
-                    const itmMatch = path.match(/(itm[a-z0-9]+)/i);
-                    const productId = itmMatch ? itmMatch[1] : pid;
-                    return `https://www.flipkart.com/${productName}/product-reviews/${productId}`;
+                    return `https://www.flipkart.com/${productName}/product-reviews/${itmMatch[1]}`;
                 }
 
                 return inputUrl;
@@ -63,7 +53,7 @@ async function main() {
         }
 
         const reviewUrls = initial.map(toReviewUrl);
-        log.info(`Processing ${reviewUrls.length} URL(s): ${reviewUrls[0]}`);
+        log.info(`Processing: ${reviewUrls[0]}`);
 
         const proxyConf = proxyConfiguration ? await Actor.createProxyConfiguration({ ...proxyConfiguration }) : undefined;
 
@@ -72,11 +62,8 @@ async function main() {
         let batchBuffer = [];
 
         function extractProductInfo(reviewUrl) {
-            // Handle both /product-reviews/itmXXX and /p/itmXXX formats
             let match = reviewUrl.match(/\/([^\/]+)\/product-reviews\/(itm[a-z0-9]+)/i);
-            if (!match) {
-                match = reviewUrl.match(/\/([^\/]+)\/p\/(itm[a-z0-9]+)/i);
-            }
+            if (!match) match = reviewUrl.match(/\/([^\/]+)\/p\/(itm[a-z0-9]+)/i);
             if (!match) return null;
             return {
                 productName: match[1].replace(/-/g, ' '),
@@ -89,52 +76,64 @@ async function main() {
             const productInfo = extractProductInfo(reviewUrl);
             if (!productInfo) return reviews;
 
-            // Try multiple possible review container selectors
-            let reviewContainers = $('div.gMdEY7.rmo75L');
+            // Find all review row containers - these are the main review blocks
+            // Updated selectors based on latest investigation
+            let reviewContainers = $('div.col.EPCNoQ');
 
-            // Fallback selectors if primary doesn't work
+            // Fallback selectors
             if (reviewContainers.length === 0) {
-                reviewContainers = $('div.col.EPCmJX');
+                reviewContainers = $('div.gMdEY7.rmo75L');
             }
             if (reviewContainers.length === 0) {
-                reviewContainers = $('div[data-id]').filter((_, el) => {
-                    return $(el).find('div._3LWZlK, div.XQDdHH').length > 0;
-                });
+                // Try to find divs that contain rating elements
+                reviewContainers = $('div.EkgbOr, div.XQDdHH, div._3LWZlK, div.MKiFS6').closest('div.col, div.row').parent();
             }
 
             reviewContainers.each((_, container) => {
                 try {
                     const $c = $(container);
 
-                    // Rating - try multiple selectors
+                    // Rating - updated selectors: EkgbOr is the new class
                     let rating = null;
-                    let ratingElem = $c.find('div.MKiFS6, div._3LWZlK, div.XQDdHH').first();
+                    const ratingElem = $c.find('div.EkgbOr, div.XQDdHH, div._3LWZlK, div.MKiFS6').first();
                     if (ratingElem.length) {
                         const ratingMatch = ratingElem.text().trim().match(/(\d+)/);
                         if (ratingMatch) rating = parseInt(ratingMatch[1]);
                     }
 
-                    // Review text - try multiple selectors
-                    let reviewText = null;
-                    let reviewTextElem = $c.find('div.HM2vKw, div.t-ZTKy, div.ZmyHeo, div._6K-7Co').first();
-                    if (reviewTextElem.length) {
-                        reviewText = reviewTextElem.text().trim() || null;
+                    // Title - qW2QI1 is the new class
+                    let title = null;
+                    const titleElem = $c.find('p.qW2QI1, p.z9E0IG, p._2-N1Vz').first();
+                    if (titleElem.length) {
+                        title = titleElem.text().trim() || null;
                     }
 
-                    if (!rating || !reviewText) return;
+                    // Review text - ZmyHeo, t-ZTKy, HM2vKw, kXosBy (parent of READ MORE)
+                    let reviewText = null;
+                    const textElem = $c.find('div.ZmyHeo, div.t-ZTKy, div.HM2vKw, div._6K-7Co').first();
+                    if (textElem.length) {
+                        reviewText = textElem.text().replace(/READ MORE/gi, '').trim() || null;
+                    }
 
-                    let title = null;
-                    const firstSentence = reviewText.split('.')[0];
-                    if (firstSentence && firstSentence.length < 100) title = firstSentence;
+                    // Skip if no rating or no text
+                    if (!rating || (!reviewText && !title)) return;
 
-                    // Author - try multiple selectors
-                    const author = $c.find('p.zJ1ZGa.ZDi3w2, p._2sc7Ds, span._2V4MzO').first().text().trim() || null;
+                    // If no title, use first sentence of review
+                    if (!title && reviewText) {
+                        const firstSentence = reviewText.split('.')[0];
+                        if (firstSentence && firstSentence.length < 100) title = firstSentence;
+                    }
 
-                    // Date
+                    // Author - zJ1ZGa ZDi3w2, _2sc7Ds
+                    const author = $c.find('p.zJ1ZGa.ZDi3w2, p._2sc7Ds').first().text().trim() || null;
+
+                    // Date - zJ1ZGa (without ZDi3w2)
                     let date = null;
                     $c.find('p.zJ1ZGa, p._2sc7Ds').each((_, elem) => {
                         const text = $(elem).text().trim();
-                        if (text.match(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec),?\s*\d{4}/i)) {
+                        // Match patterns like "Apr, 2024" or "8 months ago"
+                        if (text.match(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec),?\s*\d{4}/i) ||
+                            text.match(/\d+\s*(days?|months?|years?)\s*ago/i)) {
                             date = text;
                             return false;
                         }
@@ -146,7 +145,7 @@ async function main() {
                     const helpfulMatch = $c.find('span.Fp3hrV, span._3c3Px5').first().text().trim().match(/(\d+)/);
                     if (helpfulMatch) helpfulCount = parseInt(helpfulMatch[1]);
 
-                    const reviewId = Buffer.from(`${author}_${reviewText}`.slice(0, 100)).toString('base64').slice(0, 20);
+                    const reviewId = Buffer.from(`${author}_${title}_${reviewText}`.slice(0, 100)).toString('base64').slice(0, 20);
 
                     reviews.push({
                         product_name: productInfo.productName,
