@@ -14,16 +14,7 @@
     "results_wanted": {
       "title": "Maximum number of reviews",
       "type": "integer",
-      "description": "Maximum number of reviews to collect per product. Set to a reasonable number to avoid long run times.",
-      "minimum": 1,
-      "default": 20,
-      "editor": "number",
-      "prefill": 20
-    },
-    "max_pages": {
-      "title": "Maximum number of pages",
-      "type": "integer",
-      "description": "Safety cap on the number of review pages to visit per product",
+      "description": "Maximum number of reviews to collect per product. Pagination is handled automatically.",
       "minimum": 1,
       "default": 20,
       "editor": "number",
