@@ -11,19 +11,6 @@
       "editor": "textfield",
       "prefill": "https://www.flipkart.com/adidas-ampligy-m-running-shoes-men/product-reviews/itmab79cd4ce225d"
     },
-    "url": {
-      "title": "Product Review URL (alternative)",
-      "type": "string",
-      "description": "Alternative field for product review URL",
-      "editor": "textfield"
-    },
-    "startUrls": {
-      "title": "Multiple Product Review URLs",
-      "type": "array",
-      "description": "Scrape reviews from multiple products by providing an array of Flipkart review URLs",
-      "editor": "json",
-      "prefill": []
-    },
     "results_wanted": {
       "title": "Maximum number of reviews",
       "type": "integer",
