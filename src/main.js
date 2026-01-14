@@ -23,8 +23,47 @@ async function main() {
         if (url) initial.push(url);
 
         if (!initial.length) {
-            throw new Error('No start URL provided. Please provide a Flipkart product review URL.');
+            throw new Error('No start URL provided. Please provide a Flipkart product or review URL.');
         }
+
+        // Convert product URL to review URL if needed
+        function toReviewUrl(inputUrl) {
+            try {
+                const urlObj = new URL(inputUrl);
+                const path = urlObj.pathname;
+
+                // Already a review URL
+                if (path.includes('/product-reviews/')) {
+                    return inputUrl;
+                }
+
+                // Product URL format: /product-name/p/itmXXX
+                const productMatch = path.match(/\/([^\/]+)\/p\/(itm[a-z0-9]+)/i);
+                if (productMatch) {
+                    const productName = productMatch[1];
+                    const productId = productMatch[2];
+                    return `https://www.flipkart.com/${productName}/product-reviews/${productId}`;
+                }
+
+                // If URL has pid parameter, extract it
+                const pid = urlObj.searchParams.get('pid');
+                if (pid) {
+                    const pathParts = path.split('/').filter(p => p);
+                    const productName = pathParts[0] || 'product';
+                    // Find itm ID in the path
+                    const itmMatch = path.match(/(itm[a-z0-9]+)/i);
+                    const productId = itmMatch ? itmMatch[1] : pid;
+                    return `https://www.flipkart.com/${productName}/product-reviews/${productId}`;
+                }
+
+                return inputUrl;
+            } catch (e) {
+                return inputUrl;
+            }
+        }
+
+        const reviewUrls = initial.map(toReviewUrl);
+        log.info(`Processing ${reviewUrls.length} URL(s): ${reviewUrls[0]}`);
 
         const proxyConf = proxyConfiguration ? await Actor.createProxyConfiguration({ ...proxyConfiguration }) : undefined;
 
@@ -33,7 +72,11 @@ async function main() {
         let batchBuffer = [];
 
         function extractProductInfo(reviewUrl) {
-            const match = reviewUrl.match(/\/([^\/]+)\/product-reviews\/(itm[a-z0-9]+)/i);
+            // Handle both /product-reviews/itmXXX and /p/itmXXX formats
+            let match = reviewUrl.match(/\/([^\/]+)\/product-reviews\/(itm[a-z0-9]+)/i);
+            if (!match) {
+                match = reviewUrl.match(/\/([^\/]+)\/p\/(itm[a-z0-9]+)/i);
+            }
             if (!match) return null;
             return {
                 productName: match[1].replace(/-/g, ' '),
@@ -46,35 +89,61 @@ async function main() {
             const productInfo = extractProductInfo(reviewUrl);
             if (!productInfo) return reviews;
 
-            $('div.gMdEY7.rmo75L').each((_, container) => {
+            // Try multiple possible review container selectors
+            let reviewContainers = $('div.gMdEY7.rmo75L');
+
+            // Fallback selectors if primary doesn't work
+            if (reviewContainers.length === 0) {
+                reviewContainers = $('div.col.EPCmJX');
+            }
+            if (reviewContainers.length === 0) {
+                reviewContainers = $('div[data-id]').filter((_, el) => {
+                    return $(el).find('div._3LWZlK, div.XQDdHH').length > 0;
+                });
+            }
+
+            reviewContainers.each((_, container) => {
                 try {
                     const $c = $(container);
 
+                    // Rating - try multiple selectors
                     let rating = null;
-                    const ratingMatch = $c.find('div.MKiFS6').first().text().trim().match(/(\d+)/);
-                    if (ratingMatch) rating = parseInt(ratingMatch[1]);
+                    let ratingElem = $c.find('div.MKiFS6, div._3LWZlK, div.XQDdHH').first();
+                    if (ratingElem.length) {
+                        const ratingMatch = ratingElem.text().trim().match(/(\d+)/);
+                        if (ratingMatch) rating = parseInt(ratingMatch[1]);
+                    }
 
-                    const reviewText = $c.find('div.HM2vKw').first().text().trim() || null;
+                    // Review text - try multiple selectors
+                    let reviewText = null;
+                    let reviewTextElem = $c.find('div.HM2vKw, div.t-ZTKy, div.ZmyHeo, div._6K-7Co').first();
+                    if (reviewTextElem.length) {
+                        reviewText = reviewTextElem.text().trim() || null;
+                    }
+
                     if (!rating || !reviewText) return;
 
                     let title = null;
                     const firstSentence = reviewText.split('.')[0];
                     if (firstSentence && firstSentence.length < 100) title = firstSentence;
 
-                    const author = $c.find('p.zJ1ZGa.ZDi3w2').first().text().trim() || null;
+                    // Author - try multiple selectors
+                    const author = $c.find('p.zJ1ZGa.ZDi3w2, p._2sc7Ds, span._2V4MzO').first().text().trim() || null;
 
+                    // Date
                     let date = null;
-                    $c.find('p.zJ1ZGa').each((_, elem) => {
-                        if (!$(elem).hasClass('ZDi3w2')) {
-                            date = $(elem).text().trim();
+                    $c.find('p.zJ1ZGa, p._2sc7Ds').each((_, elem) => {
+                        const text = $(elem).text().trim();
+                        if (text.match(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec),?\s*\d{4}/i)) {
+                            date = text;
                             return false;
                         }
                     });
 
-                    const verified = $c.find('p.Zhmv6U').length > 0;
+                    const verified = $c.find('p.Zhmv6U').length > 0 || $c.text().includes('Certified Buyer');
 
                     let helpfulCount = 0;
-                    const helpfulMatch = $c.find('span.Fp3hrV').first().text().trim().match(/(\d+)/);
+                    const helpfulMatch = $c.find('span.Fp3hrV, span._3c3Px5').first().text().trim().match(/(\d+)/);
                     if (helpfulMatch) helpfulCount = parseInt(helpfulMatch[1]);
 
                     const reviewId = Buffer.from(`${author}_${reviewText}`.slice(0, 100)).toString('base64').slice(0, 20);
@@ -118,9 +187,7 @@ async function main() {
             persistCookiesPerSession: true,
             sessionPoolOptions: {
                 maxPoolSize: 50,
-                sessionOptions: {
-                    maxUsageCount: 10,
-                },
+                sessionOptions: { maxUsageCount: 10 },
             },
             maxConcurrency: 5,
             minConcurrency: 1,
@@ -133,8 +200,6 @@ async function main() {
                         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
                         'Accept-Language': 'en-US,en;q=0.9',
                         'Accept-Encoding': 'gzip, deflate, br',
-                        'Cache-Control': 'no-cache',
-                        'Pragma': 'no-cache',
                         'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
                         'Sec-Ch-Ua-Mobile': '?0',
                         'Sec-Ch-Ua-Platform': '"Windows"',
@@ -176,7 +241,7 @@ async function main() {
         });
 
         log.info(`Starting scrape for ${RESULTS_WANTED} reviews...`);
-        await crawler.run(initial.map(u => ({ url: u, userData: { pageNo: 1, baseUrl: u } })));
+        await crawler.run(reviewUrls.map(u => ({ url: u, userData: { pageNo: 1, baseUrl: u } })));
         await pushBatch(true);
         log.info(`✅ Done. Saved ${saved} reviews.`);
     } finally {
