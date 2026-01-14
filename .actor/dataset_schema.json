@@ -1,0 +1,58 @@
+{
+  "actorSpecification": 1,
+  "fields": {},
+  "views": {
+    "overview": {
+      "title": "Overview",
+      "transformation": {
+        "fields": [
+          "product_name",
+          "rating",
+          "title",
+          "review_text",
+          "author",
+          "date",
+          "verified_purchase",
+          "url"
+        ]
+      },
+      "display": {
+        "component": "table",
+        "properties": {
+          "product_name": {
+            "label": "Product",
+            "format": "text"
+          },
+          "rating": {
+            "label": "Rating",
+            "format": "text"
+          },
+          "title": {
+            "label": "Review Title",
+            "format": "text"
+          },
+          "review_text": {
+            "label": "Review",
+            "format": "text"
+          },
+          "author": {
+            "label": "Author",
+            "format": "text"
+          },
+          "date": {
+            "label": "Date",
+            "format": "text"
+          },
+          "verified_purchase": {
+            "label": "Verified",
+            "format": "text"
+          },
+          "url": {
+            "label": "Source URL",
+            "format": "link"
+          }
+        }
+      }
+    }
+  }
+}

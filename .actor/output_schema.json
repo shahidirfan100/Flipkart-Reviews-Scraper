@@ -1,0 +1,21 @@
+{
+    "actorSpecification": 1,
+    "fields": {},
+    "views": {
+        "overview": {
+            "title": "Overview",
+            "transformation": {
+                "fields": [
+                    "product_name",
+                    "rating",
+                    "title",
+                    "review_text",
+                    "author",
+                    "date",
+                    "verified_purchase",
+                    "url"
+                ]
+            }
+        }
+    }
+}

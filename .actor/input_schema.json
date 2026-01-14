@@ -1,0 +1,60 @@
+{
+  "title": "Flipkart Reviews Scraper",
+  "description": "Extract product reviews from Flipkart. Provide a Flipkart product review URL to scrape reviews with ratings, text, author, date, and more. Fast and reliable with automatic pagination.",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "startUrl": {
+      "title": "Product Review URL",
+      "type": "string",
+      "description": "Direct link to a Flipkart product review page (e.g., https://www.flipkart.com/product-name/product-reviews/itmXXXXXXXXXX)",
+      "editor": "textfield",
+      "prefill": "https://www.flipkart.com/adidas-ampligy-m-running-shoes-men/product-reviews/itmab79cd4ce225d"
+    },
+    "url": {
+      "title": "Product Review URL (alternative)",
+      "type": "string",
+      "description": "Alternative field for product review URL",
+      "editor": "textfield"
+    },
+    "startUrls": {
+      "title": "Multiple Product Review URLs",
+      "type": "array",
+      "description": "Scrape reviews from multiple products by providing an array of Flipkart review URLs",
+      "editor": "json",
+      "prefill": []
+    },
+    "results_wanted": {
+      "title": "Maximum number of reviews",
+      "type": "integer",
+      "description": "Maximum number of reviews to collect per product. Set to a reasonable number to avoid long run times.",
+      "minimum": 1,
+      "default": 20,
+      "editor": "number",
+      "prefill": 20
+    },
+    "max_pages": {
+      "title": "Maximum number of pages",
+      "type": "integer",
+      "description": "Safety cap on the number of review pages to visit per product",
+      "minimum": 1,
+      "default": 20,
+      "editor": "number",
+      "prefill": 20
+    },
+    "proxyConfiguration": {
+      "title": "Proxy configuration",
+      "type": "object",
+      "description": "Proxy settings for requests. Residential proxies recommended for Flipkart.",
+      "editor": "proxy",
+      "default": {
+        "useApifyProxy": true,
+        "apifyProxyGroups": [
+          "RESIDENTIAL"
+        ]
+      }
+    }
+  },
+  "required": [],
+  "additionalProperties": false
+}
