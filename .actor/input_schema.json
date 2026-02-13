@@ -9,6 +9,7 @@
       "type": "string",
       "description": "Direct link to a Flipkart product review page (e.g., https://www.flipkart.com/product-name/product-reviews/itmXXXXXXXXXX)",
       "editor": "textfield",
+      "default": "https://www.flipkart.com/adidas-ampligy-m-running-shoes-men/product-reviews/itmab79cd4ce225d",
       "prefill": "https://www.flipkart.com/adidas-ampligy-m-running-shoes-men/product-reviews/itmab79cd4ce225d"
     },
     "results_wanted": {
@@ -23,16 +24,15 @@
     "proxyConfiguration": {
       "title": "Proxy configuration",
       "type": "object",
-      "description": "Proxy settings for requests. Residential proxies recommended for Flipkart.",
+      "description": "Proxy settings for requests. Enable Apify Proxy if needed for anti-bot bypass.",
       "editor": "proxy",
       "default": {
-        "useApifyProxy": true,
-        "apifyProxyGroups": [
-          "RESIDENTIAL"
-        ]
+        "useApifyProxy": false
       }
     }
   },
-  "required": [],
+  "required": [
+    "startUrl"
+  ],
   "additionalProperties": false
 }
