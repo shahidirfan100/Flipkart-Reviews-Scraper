@@ -1,5 +1,7 @@
 import { Actor, log } from 'apify';
 import { gotScraping } from 'got-scraping';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 
 const FLIPKART_ORIGIN = 'https://www.flipkart.com';
 const MAX_PAGES_PER_PRODUCT = 200;
@@ -282,8 +284,10 @@ async function fetchReviewPageHtml(url, proxyConfiguration) {
         const response = await gotScraping({
             url,
             proxyUrl,
-            timeout: { request: 60000 },
-            retry: { limit: 3 },
+            timeout: { request: 25000 },
+            retry: { limit: 1 },
+            throwHttpErrors: false,
+            http2: false,
             headers: requestHeaders,
         });
 
@@ -308,8 +312,52 @@ async function fetchReviewPageHtml(url, proxyConfiguration) {
     }
 }
 
+function hasAnyStartUrl(input) {
+    if (!input || typeof input !== 'object') return false;
+    if (typeof input.startUrl === 'string' && input.startUrl.trim()) return true;
+    if (typeof input.url === 'string' && input.url.trim()) return true;
+    if (Array.isArray(input.startUrls) && input.startUrls.some((u) => (typeof u === 'string' && u.trim()) || (u && typeof u.url === 'string' && u.url.trim()))) {
+        return true;
+    }
+    return false;
+}
+
+async function loadBundledInputJson() {
+    try {
+        const inputPath = path.join(process.cwd(), 'INPUT.json');
+        const raw = await fs.readFile(inputPath, 'utf8');
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch {
+        return null;
+    }
+}
+
+function isProxyActuallyEnabled(proxyConfigurationInput) {
+    if (!proxyConfigurationInput || typeof proxyConfigurationInput !== 'object') return false;
+    if (proxyConfigurationInput.useApifyProxy === true) return true;
+    if (Array.isArray(proxyConfigurationInput.proxyUrls) && proxyConfigurationInput.proxyUrls.length > 0) return true;
+    return false;
+}
+
 async function main() {
-    const input = (await Actor.getInput()) || {};
+    const env = Actor.getEnv();
+    const timeoutAt = typeof env?.timeoutAt === 'number' ? env.timeoutAt : null;
+    const isNearTimeout = () => (timeoutAt ? (Date.now() + 25000 >= timeoutAt) : false);
+
+    let input = (await Actor.getInput()) || {};
+    if (!hasAnyStartUrl(input)) {
+        const bundledInput = await loadBundledInputJson();
+        if (bundledInput && hasAnyStartUrl(bundledInput)) {
+            log.info('Input is empty; falling back to bundled INPUT.json defaults.');
+            const sanitizedInput = { ...input };
+            if (typeof sanitizedInput.startUrl === 'string' && !sanitizedInput.startUrl.trim()) delete sanitizedInput.startUrl;
+            if (typeof sanitizedInput.url === 'string' && !sanitizedInput.url.trim()) delete sanitizedInput.url;
+            if (Array.isArray(sanitizedInput.startUrls) && sanitizedInput.startUrls.length === 0) delete sanitizedInput.startUrls;
+            input = { ...bundledInput, ...sanitizedInput };
+        }
+    }
+
     const resultsWanted = parseWantedCount(input.results_wanted, 20);
     const startUrls = normalizeStartUrls(input);
 
@@ -317,9 +365,23 @@ async function main() {
         throw new Error('No start URL provided. Please provide a Flipkart product/review URL.');
     }
 
-    const proxyConfiguration = input.proxyConfiguration
+    const proxyConfiguration = isProxyActuallyEnabled(input.proxyConfiguration)
         ? await Actor.createProxyConfiguration({ ...input.proxyConfiguration })
         : undefined;
+
+    let fallbackProxyConfiguration;
+    const getFallbackProxyConfiguration = async () => {
+        if (fallbackProxyConfiguration !== undefined) return fallbackProxyConfiguration;
+        try {
+            log.info('Attempting Apify Proxy fallback for improved reliability...');
+            fallbackProxyConfiguration = await Actor.createProxyConfiguration({ useApifyProxy: true });
+            return fallbackProxyConfiguration;
+        } catch (error) {
+            fallbackProxyConfiguration = null;
+            log.warning(`Apify Proxy fallback is not available: ${error?.message || error}`);
+            return null;
+        }
+    };
 
     let totalSaved = 0;
     const seenReviewIds = new Set();
@@ -341,8 +403,43 @@ async function main() {
         log.info(`Processing: ${canonicalReviewUrl}`);
 
         for (let page = 1; page <= MAX_PAGES_PER_PRODUCT && totalSaved < resultsWanted; page++) {
+            if (isNearTimeout()) {
+                log.warning('Run is close to timeout; stopping pagination early to flush results.');
+                break;
+            }
+
             const pageUrl = buildPagedUrl(canonicalReviewUrl, page);
-            const { body, statusCode } = await fetchReviewPageHtml(pageUrl, proxyConfiguration);
+            log.info(`Fetching page ${page}: ${pageUrl}`);
+
+            const fetchPage = (url, proxyConfig) => fetchReviewPageHtml(url, proxyConfig);
+            let body;
+            let statusCode;
+            let usedFallbackProxy = false;
+
+            try {
+                ({ body, statusCode } = await fetchPage(pageUrl, proxyConfiguration));
+            } catch (error) {
+                if (!proxyConfiguration) {
+                    const fallbackProxy = await getFallbackProxyConfiguration();
+                    if (fallbackProxy) {
+                        usedFallbackProxy = true;
+                        ({ body, statusCode } = await fetchPage(pageUrl, fallbackProxy));
+                    } else {
+                        throw error;
+                    }
+                } else {
+                    throw error;
+                }
+            }
+
+            const shouldRetryWithProxy = !proxyConfiguration && !usedFallbackProxy && (statusCode === 403 || statusCode === 429);
+            if (shouldRetryWithProxy) {
+                const fallbackProxy = await getFallbackProxyConfiguration();
+                if (fallbackProxy) {
+                    usedFallbackProxy = true;
+                    ({ body, statusCode } = await fetchPage(pageUrl, fallbackProxy));
+                }
+            }
 
             if (statusCode >= 400) {
                 log.warning(`Skipping page ${page}, HTTP ${statusCode}: ${pageUrl}`);
@@ -350,16 +447,39 @@ async function main() {
             }
 
             if (isLikelyBlocked(body)) {
-                log.warning(`Potential anti-bot block detected at page ${page}.`);
-                await Actor.setValue('debug-blocked-page.html', body, { contentType: 'text/html' });
-                break;
+                if (!proxyConfiguration && !usedFallbackProxy) {
+                    const fallbackProxy = await getFallbackProxyConfiguration();
+                    if (fallbackProxy) {
+                        usedFallbackProxy = true;
+                        ({ body, statusCode } = await fetchPage(pageUrl, fallbackProxy));
+                    }
+                }
+
+                if (isLikelyBlocked(body)) {
+                    log.warning(`Potential anti-bot block detected at page ${page}.`);
+                    await Actor.setValue('debug-blocked-page.html', body, { contentType: 'text/html' });
+                    break;
+                }
             }
 
-            const initialState = extractInitialStateFromHtml(body);
+            let initialState = extractInitialStateFromHtml(body);
             if (!initialState) {
-                log.warning(`No __INITIAL_STATE__ found at page ${page}. Saving debug HTML.`);
-                await Actor.setValue(`debug-missing-state-page-${page}.html`, body, { contentType: 'text/html' });
-                break;
+                if (!proxyConfiguration && !usedFallbackProxy) {
+                    const fallbackProxy = await getFallbackProxyConfiguration();
+                    if (fallbackProxy) {
+                        usedFallbackProxy = true;
+                        ({ body, statusCode } = await fetchPage(pageUrl, fallbackProxy));
+                    }
+                }
+
+                const retryState = extractInitialStateFromHtml(body);
+                if (!retryState) {
+                    log.warning(`No __INITIAL_STATE__ found at page ${page}. Saving debug HTML.`);
+                    await Actor.setValue(`debug-missing-state-page-${page}.html`, body, { contentType: 'text/html' });
+                    break;
+                }
+
+                initialState = retryState;
             }
 
             if (page === 1) {
@@ -404,6 +524,10 @@ async function main() {
 
     await flushBatch(true);
     log.info(`Done. Saved ${totalSaved} reviews.`);
+
+    if (totalSaved === 0) {
+        throw new Error('No reviews were extracted. The page may be blocked or the product has no reviews.');
+    }
 }
 
 try {
