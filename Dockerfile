@@ -1,15 +1,21 @@
-FROM alpine:latest
+FROM apify/actor-node-playwright-firefox:22-1.56.1
 
-RUN apk add --no-cache nodejs npm
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
-RUN addgroup app && adduser app -G app -D
-WORKDIR /home/app
-USER app
+# Check preinstalled packages
+RUN npm ls crawlee apify puppeteer playwright || true
 
-COPY --chown=app:app package*.json ./
-RUN npm i --omit=dev && rm -r ~/.npm || true
+# Copy just package.json and package-lock.json first for caching
+COPY --chown=myuser:myuser package*.json Dockerfile check-playwright-version.mjs ./
 
-COPY --chown=app:app . ./
+# Check Playwright version matches base image
+RUN node check-playwright-version.mjs
+
+RUN npm --quiet set progress=false \
+	&& npm install --omit=dev --omit=optional \
+	&& rm -r ~/.npm
+
+COPY --chown=myuser:myuser . ./
 
 ENV APIFY_LOG_LEVEL=INFO
 

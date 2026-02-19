@@ -8,10 +8,11 @@
     "crawlee": "^3.15.3",
     "cheerio": "^1.0.0-rc.12",
     "got-scraping": "^4.1.2",
-    "header-generator": "^2.1.27"
+    "playwright": "1.56.1"
   },
   "scripts": {
     "start": "node src/main.js",
+    "postinstall": "node -e \"if (process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD === '1') { console.log('Skipping Playwright browser download (PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1)'); process.exit(0); } require('child_process').execSync('npx playwright install firefox', { stdio: 'inherit' });\"",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint",

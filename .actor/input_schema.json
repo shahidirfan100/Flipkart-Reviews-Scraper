@@ -1,21 +1,37 @@
 {
   "title": "Flipkart Reviews Scraper",
-  "description": "Extract product reviews from Flipkart. Provide a Flipkart product review URL to scrape reviews with ratings, text, author, date, and more. Fast and reliable with automatic pagination.",
+  "description": "Extract product reviews from Flipkart. Accepts product or product-review URLs, auto-cleans them, and uses API-first extraction when pid is available.",
   "type": "object",
   "schemaVersion": 1,
   "properties": {
     "startUrl": {
-      "title": "Product Review URL",
+      "title": "Flipkart URL",
       "type": "string",
-      "description": "Direct link to a Flipkart product review page (e.g., https://www.flipkart.com/product-name/product-reviews/itmXXXXXXXXXX)",
+      "description": "Flipkart product URL or product-review URL. Full product URLs with pid/lid query params improve API reliability.",
       "editor": "textfield",
       "default": "https://www.flipkart.com/adidas-ampligy-m-running-shoes-men/product-reviews/itmab79cd4ce225d",
       "prefill": "https://www.flipkart.com/adidas-ampligy-m-running-shoes-men/product-reviews/itmab79cd4ce225d"
+    },
+    "startUrls": {
+      "title": "Multiple URLs",
+      "type": "array",
+      "description": "Optional list of product/product-review URLs to scrape in one run.",
+      "editor": "requestListSources",
+      "default": []
     },
     "results_wanted": {
       "title": "Maximum number of reviews",
       "type": "integer",
       "description": "Maximum number of reviews to collect per product. Pagination is handled automatically.",
+      "minimum": 1,
+      "default": 20,
+      "editor": "number",
+      "prefill": 20
+    },
+    "max_pages": {
+      "title": "Maximum pages per product",
+      "type": "integer",
+      "description": "Safety cap for review pagination per product.",
       "minimum": 1,
       "default": 20,
       "editor": "number",
@@ -31,8 +47,6 @@
       }
     }
   },
-  "required": [
-    "startUrl"
-  ],
+  "required": [],
   "additionalProperties": false
 }

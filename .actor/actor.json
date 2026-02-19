@@ -2,7 +2,7 @@
   "actorSpecification": 1,
   "name": "flipkart-reviews-scraper",
   "meta": {
-    "generatedBy": "GPT-5.3-Codex"
+    "generatedBy": "GPT-5 Codex"
   },
   "version": "1.0",
   "buildTag": "latest",
