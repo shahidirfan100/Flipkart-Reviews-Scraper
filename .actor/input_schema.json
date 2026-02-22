@@ -43,10 +43,13 @@
       "description": "Proxy settings for requests. Enable Apify Proxy if needed for anti-bot bypass.",
       "editor": "proxy",
       "default": {
-        "useApifyProxy": false
+        "useApifyProxy": true
+      },
+      "prefill": {
+        "useApifyProxy": true
       }
     }
   },
-  "required": [],
+  "required": ["startUrl"],
   "additionalProperties": false
 }

@@ -231,10 +231,10 @@ async function runPlaywrightFirefoxFallback({
             userAgent: getRandomFirefoxUserAgent(),
         },
         proxyConfiguration,
-        maxConcurrency: 5,
-        maxRequestRetries: 1,
-        navigationTimeoutSecs: 30,
-        requestHandlerTimeoutSecs: 45,
+        maxConcurrency: 2,
+        maxRequestRetries: 0,
+        navigationTimeoutSecs: 20,
+        requestHandlerTimeoutSecs: 30,
         preNavigationHooks: [
             async ({ page }) => {
                 await page.route('**/*', (route) => {
@@ -1019,9 +1019,15 @@ async function main() {
         throw new Error('No start URL provided. Please provide a Flipkart product/review URL.');
     }
 
-    const proxyConfiguration = isProxyActuallyEnabled(input.proxyConfiguration)
-        ? await Actor.createProxyConfiguration({ ...input.proxyConfiguration })
-        : undefined;
+    let proxyConfiguration;
+    if (isProxyActuallyEnabled(input.proxyConfiguration)) {
+        try {
+            proxyConfiguration = await Actor.createProxyConfiguration({ ...input.proxyConfiguration });
+        } catch (error) {
+            proxyConfiguration = undefined;
+            log.warning(`Proxy configuration is enabled in input, but could not be created. Continuing without proxy. (${error?.message || error})`);
+        }
+    }
 
     let fallbackProxyConfiguration;
     const getFallbackProxyConfiguration = async () => {
@@ -1042,6 +1048,12 @@ async function main() {
             log.warning(`Apify Proxy fallback is not available: ${error?.message || error}`);
             return null;
         }
+    };
+
+    const getProxyOrFallback = async () => {
+        if (proxyConfiguration) return proxyConfiguration;
+        const fallback = await getFallbackProxyConfiguration();
+        return fallback || undefined;
     };
 
     let totalSaved = 0;
@@ -1081,7 +1093,7 @@ async function main() {
                 reviewUrl: canonicalReviewUrl,
                 pagesToTry: dynamicPagesToTry,
                 maxReviews: remaining,
-                proxyConfiguration,
+                proxyConfiguration: await getProxyOrFallback(),
                 isNearTimeout,
             });
 
@@ -1336,7 +1348,7 @@ async function main() {
                 reviewBaseUrl: canonicalReviewUrl,
                 pagesToTry,
                 resultsWanted,
-                proxyConfiguration,
+                proxyConfiguration: await getProxyOrFallback(),
                 seenReviewIds,
                 isNearTimeout,
                 shouldStop: () => totalSaved >= resultsWanted,
